@@ -2,7 +2,7 @@
 
 ## Overview
 
-A pure frontend Vue 3 + TypeScript app that lets users download Douyin (抖音) videos by pasting a video ID. A lightweight Cloudflare Worker proxies the Douyin API to bypass CORS, returning only the essential JSON data. Video files are downloaded directly from Douyin's CDN by the browser.
+A pure frontend Vue 3 + TypeScript app that lets users download Douyin (抖音) videos by pasting a video ID. A lightweight Cloudflare Worker acts as a pure pass-through proxy to bypass CORS — it forwards the raw Douyin API JSON response without any modification. All data parsing, extraction, and control lives in the frontend. Video files are downloaded directly from Douyin's CDN by the browser.
 
 ## Architecture
 
@@ -11,14 +11,14 @@ User Browser (Vue 3 + TS)
        │
        │  ① GET /aweme/detail?aweme_id=xxx
        ▼
-  Cloudflare Worker
+  Cloudflare Worker (pure proxy, no data mutation)
        │  ② fetch 抖音 API + random UA header
        ▼
-  抖音 API → full JSON response
+  抖音 API → raw JSON response
        │
-       │  ③ Worker strips to essential fields, returns JSON
+       │  ③ Worker returns raw JSON as-is (pass-through)
        ▼
-  Vue Frontend — renders video info, cover, download button
+  Vue Frontend — parses JSON, extracts video info, renders UI
        │
        │  ④ <a download> or fetch→blob from Douyin CDN URL
        ▼
@@ -78,20 +78,22 @@ douyin_downloader/
 ## Data Flow (useDouyin.ts)
 
 ```ts
-// 1. fetchWorker(awemeId) → call Cloudflare Worker
-// 2. Worker returns { aweme_id, desc, video: { play_addr, cover } }
-// 3. pickBestUrl(url_list) → first working URL
-// 4. downloadVideo(url, filename) → fetch blob → trigger download
+// 1. fetchWorker(awemeId) → call Cloudflare Worker (pass-through proxy)
+// 2. Worker returns raw Douyin JSON as-is (no modification)
+// 3. Frontend parses: aweme_detail.video.play_addr.url_list, desc, author, cover, etc.
+// 4. pickBestUrl(url_list) → first working URL
+// 5. downloadVideo(url, filename) → fetch blob → trigger download
 ```
 
 ## Worker
+
+The Worker is a **pure pass-through proxy** — it does NOT parse, transform, or modify the Douyin response in any way.
 
 ### Request Flow
 1. Receive `GET /?aweme_id=xxx`
 2. Randomly select `User-Agent` from pool
 3. Fetch `https://www-hj.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=${aweme_id}`
-4. Extract only needed fields from response
-5. Return as JSON with CORS headers
+4. Return the raw JSON response as-is with CORS headers
 
 ### UA Pool
 - Chrome 131 (Windows, macOS, Linux)
@@ -100,21 +102,8 @@ douyin_downloader/
 - Edge 131 (Windows)
 - Each request picks one at random via `Math.random()`
 
-### Response Shape (returned by Worker)
-```json
-{
-  "aweme_id": "7642657704577715475",
-  "desc": "视频描述",
-  "video": {
-    "play_addr": {
-      "url_list": ["https://...", "https://..."]
-    },
-    "cover": {
-      "url_list": ["https://..."]
-    }
-  }
-}
-```
+### Design Principle
+Workers should be simple — just forward the Duck API and get JSON data, all data manipulation in the front-end website.
 
 ## Error Handling
 
