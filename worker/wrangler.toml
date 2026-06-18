@@ -1,0 +1,18 @@
+name = "douyin-proxy"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[assets]
+directory = "../frontend/dist"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+[vars]
+# CORS origin for development. Override for production, e.g.:
+#   wrangler secret put ALLOWED_ORIGIN
+#   wrangler deploy --var ALLOWED_ORIGIN:https://your-domain.com
+ALLOWED_ORIGIN = "http://localhost:5173"
+
+# Set API_KEY via `wrangler secret put API_KEY` — never hardcode secrets.
+# Leave empty to disable API-key auth (public mode).
+

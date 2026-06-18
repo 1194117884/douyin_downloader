@@ -1,0 +1,14 @@
+{
+  "name": "douyin-proxy",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260617.1",
+    "typescript": "^6.0.3",
+    "vitest": "^3.0.0"
+  }
+}

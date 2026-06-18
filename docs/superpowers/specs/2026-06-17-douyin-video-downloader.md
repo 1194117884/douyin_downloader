@@ -2,7 +2,7 @@
 
 ## Overview
 
-A pure frontend Vue 3 + TypeScript app that lets users download Douyin (抖音) videos by pasting a video ID. A lightweight Cloudflare Worker acts as a pure pass-through proxy to bypass CORS — it forwards the raw Douyin API JSON response without any modification. All data parsing, extraction, and control lives in the frontend. Video files are downloaded directly from Douyin's CDN by the browser.
+A pure frontend Vue 3 + TypeScript app that lets users download Douyin videos by pasting a video ID. A lightweight Cloudflare Worker acts as a pure pass-through proxy to bypass CORS — it forwards the raw Douyin API JSON response without any modification. All data parsing, extraction, and control lives in the frontend. Video files are downloaded directly from Douyin's CDN by the browser.
 
 ## Architecture
 
@@ -12,9 +12,9 @@ User Browser (Vue 3 + TS)
        │  ① GET /aweme/detail?aweme_id=xxx
        ▼
   Cloudflare Worker (pure proxy, no data mutation)
-       │  ② fetch 抖音 API + random UA header
+       │  ② fetch Douyin API + random UA header
        ▼
-  抖音 API → raw JSON response
+  Douyin API → raw JSON response
        │
        │  ③ Worker returns raw JSON as-is (pass-through)
        ▼
@@ -22,7 +22,7 @@ User Browser (Vue 3 + TS)
        │
        │  ④ <a download> or fetch→blob from Douyin CDN URL
        ▼
-  抖音 CDN — video file downloaded directly by browser
+  Douyin CDN — video file downloaded directly by browser
 ```
 
 ## Project Structure
@@ -35,8 +35,7 @@ douyin_downloader/
 │   │   ├── main.ts
 │   │   ├── components/
 │   │   │   ├── VideoInput.vue        # aweme_id input + fetch trigger
-│   │   │   ├── VideoInfo.vue         # cover, title, author display
-│   │   │   └── DownloadButton.vue    # triggers browser download
+│   │   │   └── VideoInfo.vue         # cover, title, author, download links
 │   │   ├── composables/
 │   │   │   └── useDouyin.ts          # fetch Worker, parse data, download logic
 │   │   ├── types/
@@ -69,11 +68,6 @@ douyin_downloader/
 - Props: `videoData: DouyinVideo`
 - Displays: cover image, description, author, duration
 - Purely presentational
-
-### DownloadButton.vue
-- Props: `videoUrl: string`
-- On click: fetches video as blob, creates `URL.createObjectURL`, triggers `<a>` download
-- Handles filename from title/aweme_id, sanitizing illegal characters
 
 ## Data Flow (useDouyin.ts)
 
@@ -109,8 +103,8 @@ Workers should be simple — just forward the Duck API and get JSON data, all da
 
 - Invalid/missing aweme_id → Worker returns 400
 - Douyin API returns error → Worker forwards status + message
-- Network error in browser → show "请求失败" toast in UI
-- Video URL expired/unreachable → show "下载链接已失效" in UI
+- Network error in browser → show "Request failed" toast in UI
+- Video URL expired/unreachable → show "Download link expired" in UI
 
 ## Tooling
 
