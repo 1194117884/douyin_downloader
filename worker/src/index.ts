@@ -9,6 +9,11 @@ interface Env {
 type SourceName = 'web_detail' | 'share_html';
 
 const MOBILE_UA = 'Mozilla/5.0 (Linux; Android 12; Pixel 6 Build/SD1A.210817.036) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.5112.79 Mobile Safari/537.36';
+const NUMERIC_ID_RE = /^\d{15,25}$/;
+const EMBEDDED_ID_RE = /\d{15,25}/;
+const DOUYIN_ITEM_ID_RE = /https?:\/\/(?:www\.)?(?:ies)?douyin\.com\/(?:share\/)?(?:video|note)\/(\d+)/i;
+const SHORT_LINK_RE = /https?:\/\/v\.douyin\.com\/[a-zA-Z0-9_-]+\/?/i;
+const ANY_URL_RE = /https?:\/\/\S+/i;
 
 interface AttemptLog {
   source: SourceName;
@@ -99,9 +104,16 @@ function isAllowedDownloadUrl(rawUrl: string): boolean {
   }
 }
 
-function sanitizeDownloadFilename(value: string): string {
+function sanitizeDownloadFilename(value: string, asciiOnly = false): string {
   const cleaned = value.replace(/[\x00/\\:*?"<>|]/g, '_').trim();
-  return cleaned || 'douyin-video.mp4';
+  const filename = cleaned || 'douyin-video.mp4';
+  return asciiOnly ? filename.replace(/[^\x20-\x7E]/g, '_') : filename;
+}
+
+function contentDisposition(filename: string): string {
+  const fallback = sanitizeDownloadFilename(filename, true).replace(/"/g, '_');
+  const encoded = encodeURIComponent(sanitizeDownloadFilename(filename));
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
 function proxyDownloadResponse(upstreamResponse: Response, filename: string): Response {
@@ -112,7 +124,7 @@ function proxyDownloadResponse(upstreamResponse: Response, filename: string): Re
   const acceptRanges = upstreamResponse.headers.get('Accept-Ranges');
 
   headers.set('Content-Type', contentType);
-  headers.set('Content-Disposition', `attachment; filename="${sanitizeDownloadFilename(filename)}"`);
+  headers.set('Content-Disposition', contentDisposition(filename));
   headers.set('Cache-Control', 'private, no-store');
   if (contentLength) headers.set('Content-Length', contentLength);
   if (contentRange) headers.set('Content-Range', contentRange);
@@ -123,6 +135,24 @@ function proxyDownloadResponse(upstreamResponse: Response, filename: string): Re
     statusText: upstreamResponse.statusText,
     headers,
   });
+}
+
+async function proxyDownloadUrl(downloadUrl: string, filename: string, range?: string | null): Promise<Response> {
+  const upstreamResponse = await fetch(downloadUrl, {
+    redirect: 'follow',
+    headers: {
+      'User-Agent': MOBILE_UA,
+      'Referer': 'https://www.douyin.com/',
+      ...(range ? { 'Range': range } : {}),
+    },
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!upstreamResponse.ok && upstreamResponse.status !== 206) {
+    throw new FetchPathError(`Download upstream failed with status ${upstreamResponse.status}`, upstreamResponse.status);
+  }
+
+  return proxyDownloadResponse(upstreamResponse, filename);
 }
 
 // Simple in-memory rate limiter (per IP, resets on cold-start)
@@ -147,6 +177,86 @@ function hasVideoAddress(detail: unknown): boolean {
   const downloadUrls = video?.download_addr?.url_list;
   return (Array.isArray(playUrls) && playUrls.some(Boolean))
     || (Array.isArray(downloadUrls) && downloadUrls.some(Boolean));
+}
+
+function getVideoDownloadUrl(detail: unknown): string {
+  const video = (detail as { video?: { play_addr?: { url_list?: unknown }, download_addr?: { url_list?: unknown } } })?.video;
+  const playUrls = video?.play_addr?.url_list;
+  const downloadUrls = video?.download_addr?.url_list;
+  const playUrl = Array.isArray(playUrls) ? playUrls.find((url): url is string => typeof url === 'string' && Boolean(url)) : '';
+  const downloadUrl = Array.isArray(downloadUrls) ? downloadUrls.find((url): url is string => typeof url === 'string' && Boolean(url)) : '';
+  return playUrl || downloadUrl || '';
+}
+
+function getDetailText(detail: unknown, key: 'aweme_id' | 'desc'): string {
+  const value = (detail as Record<string, unknown>)?.[key];
+  return typeof value === 'string' ? value : '';
+}
+
+function extractUrl(input: string): string {
+  return input.match(ANY_URL_RE)?.[0]?.replace(/[，。),\]]+$/g, '') || '';
+}
+
+function extractItemIdFromUrl(url: string): string {
+  return url.match(DOUYIN_ITEM_ID_RE)?.[1] || '';
+}
+
+async function resolveInputToAwemeId(input: string): Promise<string> {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error('Missing input');
+  }
+  if (NUMERIC_ID_RE.test(trimmed)) {
+    return trimmed;
+  }
+
+  const url = extractUrl(trimmed);
+  if (url) {
+    const directId = extractItemIdFromUrl(url);
+    if (directId) {
+      return directId;
+    }
+
+    const shortUrl = url.match(SHORT_LINK_RE)?.[0] || '';
+    if (shortUrl) {
+      const redirectResponse = await fetch(shortUrl, {
+        redirect: 'follow',
+        headers: { 'User-Agent': MOBILE_UA },
+        signal: AbortSignal.timeout(8000),
+      });
+      const resolvedId = extractItemIdFromUrl(redirectResponse.url);
+      if (resolvedId) {
+        return resolvedId;
+      }
+      throw new Error('Could not extract video ID from redirect URL');
+    }
+  }
+
+  const embeddedId = trimmed.match(EMBEDDED_ID_RE)?.[0] || '';
+  if (embeddedId) {
+    return embeddedId;
+  }
+
+  throw new Error('Could not extract video ID from input');
+}
+
+async function readDirectDownloadInput(request: Request, url: URL): Promise<string> {
+  const queryInput = url.searchParams.get('input')?.trim();
+  if (queryInput) {
+    return queryInput;
+  }
+
+  if (request.method !== 'POST') {
+    return '';
+  }
+
+  const contentType = request.headers.get('Content-Type') || '';
+  if (contentType.includes('application/json')) {
+    const body = await request.json() as { input?: unknown };
+    return typeof body.input === 'string' ? body.input : '';
+  }
+
+  return request.text();
 }
 
 async function fetchWebAwemeDetail(awemeId: string): Promise<FetchAttemptResult> {
@@ -363,29 +473,42 @@ export default {
 
       try {
         const range = request.headers.get('Range');
-        const upstreamResponse = await fetch(downloadUrl, {
-          redirect: 'follow',
-          headers: {
-            'User-Agent': MOBILE_UA,
-            'Referer': 'https://www.douyin.com/',
-            ...(range ? { 'Range': range } : {}),
-          },
-          signal: AbortSignal.timeout(30000),
-        });
-
-        if (!upstreamResponse.ok && upstreamResponse.status !== 206) {
+        return await proxyDownloadUrl(downloadUrl, url.searchParams.get('filename') || 'douyin-video.mp4', range);
+      } catch (err) {
+        console.error('Download proxy failed', err);
+        if (err instanceof FetchPathError) {
           return jsonResponse(
-            { error: `Download upstream failed with status ${upstreamResponse.status}` },
+            { error: err.message },
             origin,
             allowedOrigin,
             { status: 502 }
           );
         }
-
-        return proxyDownloadResponse(upstreamResponse, url.searchParams.get('filename') || 'douyin-video.mp4');
-      } catch (err) {
-        console.error('Download proxy failed', err);
         return jsonResponse({ error: 'Download proxy failed' }, origin, allowedOrigin, { status: 502 });
+      }
+    }
+
+    if (url.pathname === '/api/direct-download') {
+      try {
+        const input = await readDirectDownloadInput(request, url);
+        const awemeId = await resolveInputToAwemeId(input);
+        const { result } = await fetchBestAwemeDetail(awemeId);
+        if (!result) {
+          return jsonResponse({ error: 'All Douyin fetch paths failed' }, origin, allowedOrigin, { status: 502 });
+        }
+
+        const downloadUrl = getVideoDownloadUrl(result.detail);
+        if (!downloadUrl || !isAllowedDownloadUrl(downloadUrl)) {
+          return jsonResponse({ error: 'No allowed video download URL found' }, origin, allowedOrigin, { status: 502 });
+        }
+
+        const title = getDetailText(result.detail, 'desc');
+        const filename = `${awemeId}${title ? `-${title}` : ''}.mp4`;
+        return await proxyDownloadUrl(downloadUrl, filename, request.headers.get('Range'));
+      } catch (err) {
+        console.error('Direct download failed', err);
+        const message = err instanceof Error ? err.message : 'Direct download failed';
+        return jsonResponse({ error: message }, origin, allowedOrigin, { status: 400 });
       }
     }
 

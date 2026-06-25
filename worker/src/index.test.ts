@@ -31,13 +31,13 @@ async function readJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function mockShareHtml(overrides = ''): string {
+function mockShareHtml(overrides = '', playUrl = 'https:\\/\\/example.com\\/playwm\\/video.mp4'): string {
   return `
     <html>
       <script>
         {"desc":"愿奶奶长命百岁","nickname":"想想","duration":10146,
         "digg_count":198965,"comment_count":117197,"share_count":3989,"play_count":0,
-        "play_addr":{"url_list":["https:\\/\\/example.com\\/playwm\\/video.mp4"]},
+        "play_addr":{"url_list":["${playUrl}"]},
         "download_addr":{"url_list":["https:\\/\\/example.com\\/download.mp4"]},
         "cover":{"url_list":["https:\\/\\/example.com\\/cover.jpg"]}}
         ${overrides}
@@ -204,7 +204,8 @@ describe('Douyin Proxy Worker', () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(capturedHeaders?.Referer).toBe('https://www.douyin.com/');
       expect(capturedHeaders?.['User-Agent']).toContain('Android 12');
-      expect(response.headers.get('Content-Disposition')).toBe('attachment; filename="test.mp4"');
+      expect(response.headers.get('Content-Disposition')).toContain('filename="test.mp4"');
+      expect(response.headers.get('Content-Disposition')).toContain("filename*=UTF-8''test.mp4");
       expect(response.headers.get('Content-Type')).toBe('video/mp4');
       expect(await response.text()).toBe('video-bytes');
     });
@@ -245,6 +246,89 @@ describe('Douyin Proxy Worker', () => {
       expect(response.status).toBe(400);
       expect(fetchSpy).not.toHaveBeenCalled();
       expect(await response.json()).toEqual({ error: 'Download URL is not allowed' });
+    });
+  });
+
+  describe('Direct download', () => {
+    it('accepts messy share text and returns the video stream', async () => {
+      let downloadHeaders: Record<string, string> | undefined;
+      const fetchSpy = vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce({
+          url: 'https://www.iesdouyin.com/share/video/7651611849724892019/?region=CN',
+        } as Response)
+        .mockResolvedValueOnce(jsonResponse({ error: 'blocked' }, 403))
+        .mockResolvedValueOnce(htmlResponse(mockShareHtml('', 'https:\\/\\/aweme.snssdk.com\\/aweme\\/v1\\/play\\/?video_id=abc')))
+        .mockImplementationOnce(async (_url: string | URL | Request, opts?: RequestInit) => {
+          downloadHeaders = opts?.headers as Record<string, string> | undefined;
+          return new Response('video-bytes', {
+            status: 200,
+            headers: { 'Content-Type': 'video/mp4' },
+          });
+        });
+
+      const input = '7.97 复制打开抖音 https://v.douyin.com/39WEltKtUcw/ N@w.Fu';
+      const response = await worker.fetch(
+        new Request(`http://localhost/api/direct-download?input=${encodeURIComponent(input)}`)
+      );
+
+      expect(response.status).toBe(200);
+      expect(fetchSpy).toHaveBeenCalledTimes(4);
+      expect(downloadHeaders?.Referer).toBe('https://www.douyin.com/');
+      expect(response.headers.get('Content-Disposition')).toContain('7651611849724892019-');
+      expect(response.headers.get('Content-Type')).toBe('video/mp4');
+      expect(await response.text()).toBe('video-bytes');
+    });
+
+    it('accepts POST JSON input and forwards Range to the selected video URL', async () => {
+      let downloadHeaders: Record<string, string> | undefined;
+      vi.spyOn(globalThis, 'fetch')
+        .mockResolvedValueOnce(jsonResponse({
+          aweme_detail: {
+            ...validAwemeDetail,
+            video: {
+              ...validAwemeDetail.video,
+              play_addr: { url_list: ['https://aweme.snssdk.com/aweme/v1/play/?video_id=abc'] },
+            },
+          },
+        }))
+        .mockImplementationOnce(async (_url: string | URL | Request, opts?: RequestInit) => {
+          downloadHeaders = opts?.headers as Record<string, string> | undefined;
+          return new Response('partial', {
+            status: 206,
+            headers: {
+              'Content-Type': 'video/mp4',
+              'Content-Range': 'bytes 0-6/100',
+            },
+          });
+        });
+
+      const response = await worker.fetch(
+        new Request('http://localhost/api/direct-download', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Range': 'bytes=0-6',
+          },
+          body: JSON.stringify({ input: '7425930648738942775' }),
+        })
+      );
+
+      expect(response.status).toBe(206);
+      expect(downloadHeaders?.Range).toBe('bytes=0-6');
+      expect(response.headers.get('Content-Range')).toBe('bytes 0-6/100');
+      expect(await response.text()).toBe('partial');
+    });
+
+    it('returns 400 when direct download input cannot be parsed', async () => {
+      const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+      const response = await worker.fetch(
+        new Request('http://localhost/api/direct-download?input=not-a-douyin-link')
+      );
+
+      expect(response.status).toBe(400);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(await response.json()).toEqual({ error: 'Could not extract video ID from input' });
     });
   });
 
