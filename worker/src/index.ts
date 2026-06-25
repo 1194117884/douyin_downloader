@@ -70,7 +70,7 @@ function corsHeaders(origin: string, allowedOrigin = '*'): Record<string, string
   const allowed = allowedOrigin === '*' || allowedOrigin === origin;
   return {
     'Access-Control-Allow-Origin': allowedOrigin === '*' ? '*' : allowed ? origin : allowedOrigin,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, X-API-Key',
   };
 }
