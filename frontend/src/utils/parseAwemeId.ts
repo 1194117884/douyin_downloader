@@ -2,15 +2,17 @@
 const NUMERIC_ID_RE = /^\d{15,25}$/
 
 /**
- * Extract video ID from douyin / iesdouyin URLs.
+ * Extract item ID from douyin / iesdouyin video or note URLs.
  * Handles both:
  *   - www.iesdouyin.com/share/video/7651487458273602789/...
  *   - www.douyin.com/video/7651487458273602789?...
+ *   - www.iesdouyin.com/share/note/7651537839684126329/...
+ *   - www.douyin.com/note/7651537839684126329?...
  */
-const DOUYIN_VIDEO_ID_RE = /https?:\/\/(?:www\.)?(?:ies)?douyin\.com\/(?:share\/)?video\/(\d+)/i
+const DOUYIN_ITEM_ID_RE = /https?:\/\/(?:www\.)?(?:ies)?douyin\.com\/(?:share\/)?(?:video|note)\/(\d+)/i
 
 /** Short link from v.douyin.com — needs redirect follow to resolve. */
-const SHORT_LINK_RE = /https?:\/\/v\.douyin\.com\/[a-zA-Z0-9]+/i
+const SHORT_LINK_RE = /https?:\/\/v\.douyin\.com\/[a-zA-Z0-9_-]+/i
 
 /** Generic URL extractor — picks the first http(s) URL from arbitrary text. */
 const ANY_URL_RE = /https?:\/\/\S+/i
@@ -46,7 +48,7 @@ export async function parseAwemeId(input: string, workerBaseUrl?: string, apiKey
   const url = urlMatch[0]
 
   // 3. Full douyin / iesdouyin URL — extract ID from path
-  const videoMatch = url.match(DOUYIN_VIDEO_ID_RE)
+  const videoMatch = url.match(DOUYIN_ITEM_ID_RE)
   if (videoMatch) return videoMatch[1]!
 
   // 4. Short link — resolve via Worker (or direct fetch as fallback)
@@ -84,7 +86,7 @@ async function resolveShortLink(shortUrl: string, workerBaseUrl?: string, apiKey
     // Fallback: direct fetch (Node.js / test environments without CORS)
     const response = await fetch(shortUrl, { redirect: 'follow' })
     finalUrl = response.url
-    const match = finalUrl.match(DOUYIN_VIDEO_ID_RE)
+    const match = finalUrl.match(DOUYIN_ITEM_ID_RE)
     return match ? match[1]! : null
   } catch {
     return null

@@ -28,7 +28,7 @@ describe('VideoInfo', () => {
     expect(wrapper.find('video').exists()).toBe(false)
   })
 
-  it('renders direct download links for each address option', () => {
+  it('renders proxied download links for each address option', () => {
     const wrapper = mount(VideoInfo, {
       props: {
         videoData: mockVideoData,
@@ -41,7 +41,8 @@ describe('VideoInfo', () => {
 
     const downloadLinks = wrapper.findAll('a.option-download')
     expect(downloadLinks).toHaveLength(2)
-    expect(downloadLinks[0].attributes('href')).toBe('https://example.com/dl.mp4')
+    expect(downloadLinks[0].attributes('href')).toContain('/download?url=https%3A%2F%2Fexample.com%2Fdl.mp4')
+    expect(downloadLinks[0].attributes('href')).toContain('filename=7425930648738942775-Download.mp4')
     expect(downloadLinks[0].attributes('target')).toBeUndefined()
     expect(downloadLinks[0].attributes('title')).toContain('Download')
   })

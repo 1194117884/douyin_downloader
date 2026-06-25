@@ -33,6 +33,16 @@ describe('parseAwemeId', () => {
     expect(result).toBe('7651487458273602789')
   })
 
+  it('extracts ID from a full iesdouyin.com note URL', async () => {
+    const result = await parseAwemeId('https://www.iesdouyin.com/share/note/7651537839684126329/?region=CN')
+    expect(result).toBe('7651537839684126329')
+  })
+
+  it('extracts ID from a full douyin.com note URL', async () => {
+    const result = await parseAwemeId('https://www.douyin.com/note/7651537839684126329?previous_page=app_code_link')
+    expect(result).toBe('7651537839684126329')
+  })
+
   // ---- Messy share text with URL embedded ----
   it('extracts ID from messy share text containing a short link', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
@@ -61,6 +71,16 @@ describe('parseAwemeId', () => {
     const result = await parseAwemeId('https://v.douyin.com/7EGQ5sV0MZU/')
     expect(result).toBe('7651487458273602789')
     expect(fetch).toHaveBeenCalledWith('https://v.douyin.com/7EGQ5sV0MZU/', { redirect: 'follow' })
+  })
+
+  it('follows v.douyin.com short link redirect with underscore and extracts note ID', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+      url: 'https://www.iesdouyin.com/share/note/7651537839684126329/?region=CN',
+    } as Response)
+
+    const result = await parseAwemeId('https://v.douyin.com/OnZ96B_7d5M/')
+    expect(result).toBe('7651537839684126329')
+    expect(fetch).toHaveBeenCalledWith('https://v.douyin.com/OnZ96B_7d5M/', { redirect: 'follow' })
   })
 
   it('returns null when short link redirect does not lead to a video page', async () => {

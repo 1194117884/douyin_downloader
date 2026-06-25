@@ -85,7 +85,7 @@
                   <small v-if="optionMeta(option)" class="option-meta-line">{{ optionMeta(option) }}</small>
                 </span>
               </button>
-              <a class="option-download" :href="option.url" :title="`${option.source}`" @click.stop>
+              <a class="option-download" :href="downloadHref(option)" :title="`${option.source}`" @click.stop>
                 <span aria-hidden="true">↓</span>
               </a>
             </div>
@@ -100,7 +100,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { AwemeDetail } from '../types'
-import type { VideoAddressOption } from '../composables/useDouyin'
+import { WORKER_URL, sanitizeFilename, type VideoAddressOption } from '../composables/useDouyin'
 
 const props = withDefaults(defineProps<{
   videoData: AwemeDetail | null
@@ -257,6 +257,12 @@ function optionMeta(opt: VideoAddressOption): string {
   if (opt.vmaf != null) parts.push(`VMAF ${opt.vmaf}`)
   if (opt.dataSize) parts.push(formatSize(opt.dataSize))
   return parts.join(' · ')
+}
+
+function downloadHref(opt: VideoAddressOption): string {
+  const endpoint = `${WORKER_URL.replace(/\/$/, '')}/download`
+  const filename = sanitizeFilename(`${props.videoData?.aweme_id || 'douyin-video'}-${opt.source}.mp4`)
+  return `${endpoint}?url=${encodeURIComponent(opt.url)}&filename=${encodeURIComponent(filename)}`
 }
 
 // ── Formatters ──────────────────────────────────────
